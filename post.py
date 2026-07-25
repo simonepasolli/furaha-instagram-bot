@@ -1,12 +1,15 @@
 """
-Furaha House Watamu - Instagram auto-poster.
+Furaha House Watamu - Instagram auto-poster (vision version).
 
-Picks a photo that hasn't been used recently, writes a caption from YOUR notes
-about that photo, and publishes it to Instagram.
+Picks a photo you haven't used recently, LOOKS at it, writes a caption from
+what it sees, and posts it to Instagram.
+
+You do not have to describe your photos. Just put them in the photos/ folder.
 
 Run with --dry-run to see what it WOULD post without actually posting.
 """
 
+import base64
 import json
 import os
 import random
@@ -20,17 +23,22 @@ import requests
 
 # --- Config -----------------------------------------------------------------
 
-# Which service writes the captions: "perplexity" or "anthropic".
-# Change this one word to switch. Make sure the matching API key is in
-# your GitHub Secrets (PERPLEXITY_API_KEY or ANTHROPIC_API_KEY).
+# Where the caption comes from: "perplexity" or "anthropic".
+# Both run Claude. "perplexity" uses your Perplexity key via their Agent API.
 CAPTION_PROVIDER = os.environ.get("CAPTION_PROVIDER", "perplexity")
+CAPTION_MODEL_PERPLEXITY = "anthropic/claude-haiku-4-5"
+CAPTION_MODEL_ANTHROPIC = "claude-haiku-4-5-20251001"
 
 GRAPH_VERSION = os.environ.get("GRAPH_VERSION", "v23.0")
 GRAPH = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
 ROOT = Path(__file__).parent
-PHOTOS_FILE = ROOT / "photos.json"
+PHOTOS_DIR = ROOT / "photos"
+CONFIG_FILE = ROOT / "photos.json"
 STATE_FILE = ROOT / "state" / "posted.json"
+
+IMAGE_TYPES = {".jpg", ".jpeg"}
+MAX_EDGE = 1400          # shrink before sending, to keep requests small
 
 DRY_RUN = "--dry-run" in sys.argv
 
@@ -42,9 +50,6 @@ def env(name, required=True):
     return value
 
 
-# --- Step 1: choose a photo -------------------------------------------------
-
-
 def load_json(path, default):
     if not path.exists():
         return default
@@ -52,84 +57,115 @@ def load_json(path, default):
         return json.load(f)
 
 
-def choose_photo(photos, history):
-    """Pick a random photo, preferring ones posted longest ago (or never)."""
-    if not photos:
-        sys.exit("ERROR: photos.json is empty. Add some photos first.")
+# --- Step 1: choose a photo -------------------------------------------------
 
-    never_posted = [p for p in photos if p["file"] not in history]
+
+def find_photos():
+    """Every JPEG in photos/ is fair game. No config file needed."""
+    if not PHOTOS_DIR.exists():
+        sys.exit("ERROR: There is no photos/ folder. Create it and upload some JPEGs.")
+
+    files = sorted(
+        p.name for p in PHOTOS_DIR.iterdir()
+        if p.suffix.lower() in IMAGE_TYPES and not p.name.startswith(".")
+    )
+    if not files:
+        sys.exit("ERROR: No .jpg files found in photos/. "
+                 "Note that .png and .heic are not accepted by Instagram.")
+    return files
+
+
+def choose_photo(files, history):
+    """Prefer photos never posted; otherwise re-use the ones posted longest ago."""
+    never_posted = [f for f in files if f not in history]
 
     if never_posted:
-        pool = never_posted
-        print(f"{len(never_posted)} photo(s) have never been posted. Choosing from those.")
-    else:
-        # Everything has been used. Re-use the half that was posted longest ago,
-        # so the feed doesn't repeat the same shot two weeks apart.
-        photos_by_age = sorted(photos, key=lambda p: history.get(p["file"], 0))
-        pool = photos_by_age[: max(1, len(photos_by_age) // 2)]
-        print("All photos have been posted before. Re-using the oldest ones.")
+        print(f"{len(never_posted)} of {len(files)} photos have never been posted.")
+        return random.choice(never_posted)
 
+    oldest_first = sorted(files, key=lambda f: history.get(f, 0))
+    pool = oldest_first[: max(1, len(oldest_first) // 2)]
+    print("All photos have been used before. Re-using the oldest half.")
     return random.choice(pool)
 
 
-# --- Step 2: write a caption ------------------------------------------------
+# --- Step 2: look at it and write ------------------------------------------
 
 CAPTION_SYSTEM_PROMPT = """You write Instagram captions for Furaha House, a private \
 holiday villa in Watamu on the Kenyan coast.
 
-ABSOLUTE RULE: Use ONLY the facts in the photo notes you are given. Do not search \
-the web. Do not use anything you know about Watamu, Kenya, or holiday villas from \
-any other source. If a detail is not in the notes, it does not exist. Never invent \
-features, distances, prices, amenities, room counts, or history.
+You are being shown a photograph. Write about it the way a novelist would: the \
+quality of the light, the texture of things, the temperature the air looks, what \
+hour it feels like, the silence or the sound the scene implies, what a person might \
+be about to do here. Be evocative and specific. Invent mood freely.
+
+THE ONE HARD RULE: invent atmosphere, never facts.
+
+A guest will read this, book, arrive, and stand in this exact place. Anything they \
+could arrive and find untrue is forbidden. Never state or imply:
+- distances, walking times, or travel times to anywhere
+- amenities you cannot see (air conditioning, wifi, heating, hot water, staff)
+- the number of bedrooms, bathrooms, guests, or the size of anything
+- prices, availability, discounts, or offers
+- a sea view, a sunset direction, or what is beyond the frame
+- meals, cooking, service, or people who work there
+- history, dates, place names, or facts about Watamu or Kenya
+
+Before each sentence ask: could a guest arrive and say "that was untrue"? If yes, \
+cut it. Write only about what is actually visible in this photograph, and about \
+how it feels.
 
 Style:
-- 2 to 4 short sentences. Warm and specific, not brochure-speak.
-- No emoji spam. One or two at most, or none.
-- Do not start with "Nestled", "Escape to", "Discover" or "Welcome to".
+- 2 to 4 short sentences. Present tense.
+- Do not open with "Nestled", "Escape to", "Discover", "Welcome to", or "Step into".
+- No emoji, or at most one.
 - No hashtags. They are added separately.
-- No citations, no reference numbers, no source links, no square brackets.
+- No citation markers, reference numbers, source links, or square brackets.
 - Write in English.
 
 Output the caption text only. No preamble, no quotation marks, no explanation."""
 
+USER_MESSAGE = ("Here is the photograph. Write the caption, following your rules "
+                "exactly. Describe only what you can actually see.")
+
+
+def prepare_image(filename):
+    """Shrink the photo and return (base64_string, media_type)."""
+    path = PHOTOS_DIR / filename
+    raw = path.read_bytes()
+
+    try:
+        from PIL import Image
+        import io
+
+        img = Image.open(io.BytesIO(raw))
+        img = img.convert("RGB")
+        if max(img.size) > MAX_EDGE:
+            img.thumbnail((MAX_EDGE, MAX_EDGE))
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=85)
+        raw = buffer.getvalue()
+    except ImportError:
+        print("  (Pillow not installed - sending the photo at full size)")
+
+    print(f"  sending {len(raw) // 1024} KB to the caption model")
+    return base64.standard_b64encode(raw).decode("utf-8"), "image/jpeg"
+
 
 def clean_caption(text):
-    """Strip the debris that search-grounded models leave behind."""
-    text = re.sub(r"\[\d+\]", "", text)                  # citation markers like [1][2]
+    """Strip debris that proxied models sometimes leave behind."""
+    text = re.sub(r"\[\w+:\d+\]", "", text)              # [web:1] style markers
+    text = re.sub(r"\[\d+\]", "", text)                  # [1] style markers
     text = re.sub(r"<[^>]+>", "", text)                  # stray tags
-    text = re.sub(r"^[\"\u2018\u2019\u201c\u201d']+|[\"\u201c\u201d]+$", "", text.strip())
+    text = text.strip()
+    text = re.sub(r'^["\u201c\u2018\']+|["\u201d\u2019\']+$', "", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
-    text = re.sub(r"\s+([,.!?;:])", r"\1", text)         # " ," -> ","
+    text = re.sub(r"\s+([,.!?;:])", r"\1", text)
     return text.strip()
 
 
-def call_perplexity(system_prompt, user_message, api_key):
-    response = requests.post(
-        "https://api.perplexity.ai/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": "sonar",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "max_tokens": 300,
-            "temperature": 0.9,
-            # Keep the web search as small as possible - we do not want it.
-            "web_search_options": {"search_context_size": "low"},
-        },
-        timeout=90,
-    )
-    if response.status_code != 200:
-        sys.exit(f"ERROR from Perplexity ({response.status_code}): {response.text}")
-    return response.json()["choices"][0]["message"]["content"]
-
-
-def call_anthropic(system_prompt, user_message, api_key):
+def call_anthropic(image_b64, media_type, api_key):
     response = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -138,37 +174,93 @@ def call_anthropic(system_prompt, user_message, api_key):
             "content-type": "application/json",
         },
         json={
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 300,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": user_message}],
+            "model": CAPTION_MODEL_ANTHROPIC,
+            "max_tokens": 400,
+            "system": CAPTION_SYSTEM_PROMPT,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": image_b64,
+                        },
+                    },
+                    {"type": "text", "text": USER_MESSAGE},
+                ],
+            }],
         },
-        timeout=60,
+        timeout=120,
     )
     if response.status_code != 200:
         sys.exit(f"ERROR from Anthropic ({response.status_code}): {response.text}")
     return response.json()["content"][0]["text"]
 
 
-def write_caption(photo, api_key):
-    notes = photo.get("notes", "").strip()
-    if not notes:
-        sys.exit(f"ERROR: Photo '{photo['file']}' has no notes in photos.json. "
-                 "Add notes so the caption is accurate.")
+def call_perplexity(image_b64, media_type, api_key):
+    """Perplexity's Agent API proxies Claude. OpenAI Responses format."""
+    response = requests.post(
+        "https://api.perplexity.ai/v1/responses",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": CAPTION_MODEL_PERPLEXITY,
+            "instructions": CAPTION_SYSTEM_PROMPT,
+            "input": [{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": USER_MESSAGE},
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:{media_type};base64,{image_b64}",
+                    },
+                ],
+            }],
+            "max_output_tokens": 400,
+        },
+        timeout=120,
+    )
 
-    user_message = f"""Photo notes: {notes}
+    if response.status_code != 200:
+        sys.exit(
+            f"ERROR from Perplexity ({response.status_code}): {response.text}\n\n"
+            "If this mentions images, image input, or an unsupported content type, "
+            "then Perplexity's proxy will not pass photos through to Claude. "
+            "In that case switch CAPTION_PROVIDER to 'anthropic' and use a direct "
+            "Anthropic key."
+        )
 
-Category: {photo.get('category', 'the villa')}
+    data = response.json()
 
-Write the caption using only the notes above."""
+    # Responses format: dig the assistant's text out of the output blocks.
+    if data.get("output_text"):
+        return data["output_text"]
 
+    chunks = []
+    for block in data.get("output", []):
+        if block.get("type") == "message":
+            for part in block.get("content", []):
+                if part.get("type") in ("output_text", "text") and part.get("text"):
+                    chunks.append(part["text"])
+    if not chunks:
+        sys.exit(f"ERROR: Could not find caption text in the reply: {data}")
+    return "\n".join(chunks)
+
+
+def write_caption(filename, api_key):
     if DRY_RUN and not api_key:
         return "[dry run - no API key set, caption not generated]"
 
+    image_b64, media_type = prepare_image(filename)
+
     if CAPTION_PROVIDER == "perplexity":
-        raw = call_perplexity(CAPTION_SYSTEM_PROMPT, user_message, api_key)
+        raw = call_perplexity(image_b64, media_type, api_key)
     elif CAPTION_PROVIDER == "anthropic":
-        raw = call_anthropic(CAPTION_SYSTEM_PROMPT, user_message, api_key)
+        raw = call_anthropic(image_b64, media_type, api_key)
     else:
         sys.exit(f"ERROR: CAPTION_PROVIDER is '{CAPTION_PROVIDER}'. "
                  "It must be 'perplexity' or 'anthropic'.")
@@ -176,37 +268,32 @@ Write the caption using only the notes above."""
     return clean_caption(raw)
 
 
-def add_hashtags(caption, photo, config):
-    """Combine the always-on hashtags with any specific to this photo."""
+def add_hashtags(caption, filename, config):
     tags = list(config.get("hashtags", []))
-    tags += photo.get("hashtags", [])
+    tags += config.get("extra_hashtags", {}).get(filename, [])
 
-    seen = set()
-    unique = []
+    seen, unique = set(), []
     for tag in tags:
         tag = tag if tag.startswith("#") else f"#{tag}"
         if tag.lower() not in seen:
             seen.add(tag.lower())
             unique.append(tag)
 
-    # Instagram allows 30 max; 10-15 performs better than 30 anyway.
-    unique = unique[:20]
-    return f"{caption}\n\n{' '.join(unique)}"
+    if not unique:
+        return caption
+    return f"{caption}\n\n{' '.join(unique[:20])}"
 
 
-# --- Step 3: publish to Instagram -------------------------------------------
+# --- Step 3: publish --------------------------------------------------------
 
 
-def build_image_url(photo):
-    """Instagram downloads the image from a public URL, so we point it at GitHub."""
-    repo = env("GITHUB_REPOSITORY")          # e.g. "yourname/furaha-bot"
+def build_image_url(filename):
+    repo = env("GITHUB_REPOSITORY")
     branch = os.environ.get("GITHUB_REF_NAME", "main")
-    safe_path = quote(f"photos/{photo['file']}")
-    return f"https://raw.githubusercontent.com/{repo}/{branch}/{safe_path}"
+    return f"https://raw.githubusercontent.com/{repo}/{branch}/{quote('photos/' + filename)}"
 
 
 def publish(image_url, caption, ig_user_id, token):
-    # 3a. Create a "container" - Instagram fetches and stages the image.
     print("Creating media container...")
     create = requests.post(
         f"{GRAPH}/{ig_user_id}/media",
@@ -217,20 +304,16 @@ def publish(image_url, caption, ig_user_id, token):
         sys.exit(f"ERROR creating container ({create.status_code}): {create.text}")
 
     container_id = create.json()["id"]
-    print(f"Container created: {container_id}")
 
-    # 3b. Wait until Instagram has finished downloading the image.
-    for attempt in range(12):
+    for _ in range(12):
         time.sleep(5)
         status = requests.get(
             f"{GRAPH}/{container_id}",
             params={"fields": "status_code,status", "access_token": token},
             timeout=30,
         ).json()
-
         code = status.get("status_code")
         print(f"  container status: {code}")
-
         if code == "FINISHED":
             break
         if code == "ERROR":
@@ -238,7 +321,6 @@ def publish(image_url, caption, ig_user_id, token):
     else:
         sys.exit("ERROR: Container never finished processing. Try again later.")
 
-    # 3c. Publish it.
     print("Publishing...")
     published = requests.post(
         f"{GRAPH}/{ig_user_id}/media_publish",
@@ -247,7 +329,6 @@ def publish(image_url, caption, ig_user_id, token):
     )
     if published.status_code != 200:
         sys.exit(f"ERROR publishing ({published.status_code}): {published.text}")
-
     return published.json()["id"]
 
 
@@ -255,17 +336,17 @@ def publish(image_url, caption, ig_user_id, token):
 
 
 def main():
-    config = load_json(PHOTOS_FILE, {})
-    photos = config.get("photos", [])
+    config = load_json(CONFIG_FILE, {})
     history = load_json(STATE_FILE, {})
 
-    photo = choose_photo(photos, history)
-    print(f"\nChosen photo: {photo['file']}")
+    filename = choose_photo(find_photos(), history)
+    print(f"\nChosen photo: {filename}")
 
     key_name = "PERPLEXITY_API_KEY" if CAPTION_PROVIDER == "perplexity" else "ANTHROPIC_API_KEY"
     api_key = env(key_name, required=not DRY_RUN)
-    caption = write_caption(photo, api_key)
-    full_caption = add_hashtags(caption, photo, config)
+
+    caption = write_caption(filename, api_key)
+    full_caption = add_hashtags(caption, filename, config)
 
     print("\n" + "=" * 60)
     print(full_caption)
@@ -273,26 +354,20 @@ def main():
 
     if DRY_RUN:
         print("DRY RUN - nothing was posted to Instagram.")
-        if os.environ.get("GITHUB_REPOSITORY"):
-            print(f"Image URL would be: {build_image_url(photo)}")
         return
 
-    image_url = build_image_url(photo)
+    image_url = build_image_url(filename)
     print(f"Image URL: {image_url}")
 
-    # Confirm the image is actually reachable before asking Instagram to fetch it.
     check = requests.head(image_url, timeout=30, allow_redirects=True)
     if check.status_code != 200:
         sys.exit(f"ERROR: Image URL is not publicly reachable ({check.status_code}). "
-                 "Is the repository public? Is the filename spelled correctly?")
+                 "Is the repository public?")
 
-    post_id = publish(
-        image_url, full_caption, env("IG_USER_ID"), env("IG_ACCESS_TOKEN")
-    )
+    post_id = publish(image_url, full_caption, env("IG_USER_ID"), env("IG_ACCESS_TOKEN"))
     print(f"\nSUCCESS. Posted as {post_id}")
 
-    # Record it so we don't repeat this photo next time.
-    history[photo["file"]] = int(time.time())
+    history[filename] = int(time.time())
     STATE_FILE.parent.mkdir(exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2, sort_keys=True)
