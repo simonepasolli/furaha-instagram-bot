@@ -1,0 +1,49 @@
+{
+  "_readme": "Delete the example entries below and replace them with your own. The 'file' must match the filename in the photos/ folder EXACTLY, including capital letters and the .jpg ending. The 'notes' are the most important part - the caption is written only from what you put there, so the more real detail you give, the better the caption.",
+
+  "hashtags": [
+    "#watamu",
+    "#watamukenya",
+    "#kenyacoast",
+    "#villarental",
+    "#holidayvilla",
+    "#indianocean",
+    "#malindi",
+    "#kenyatravel",
+    "#magicalkenya",
+    "#beachhouse"
+  ],
+
+  "photos": [
+    {
+      "file": "pool-morning.jpg",
+      "category": "the villa",
+      "notes": "The swimming pool at about 7am, before anyone is up. Palm shadows fall across the water. Loungers are on the left under a makuti thatch shade. The pool is 12 metres long. It is the quietest hour of the day - you can hear the birds from the garden.",
+      "hashtags": ["#poolside"]
+    },
+    {
+      "file": "master-bedroom.jpg",
+      "category": "the villa",
+      "notes": "Master bedroom, king bed with a white mosquito net. Big open window with no glass, looking into the garden. Polished concrete floor, cool underfoot. Ceiling fan. There is no air conditioning in this room but the sea breeze comes through all night.",
+      "hashtags": []
+    },
+    {
+      "file": "terrace-dinner.jpg",
+      "category": "the villa",
+      "notes": "The outdoor dining terrace set for dinner, lit with hurricane lamps. Seats eight. Our cook Amina prepares Swahili food here - coconut fish curry, pilau. Guests eat outside every night; it never gets cold enough to eat indoors.",
+      "hashtags": ["#swahilifood"]
+    },
+    {
+      "file": "watamu-beach.jpg",
+      "category": "the area around Watamu",
+      "notes": "Watamu beach at low tide, about a 6 minute walk from the house. White sand, the rock formations offshore. This stretch is inside Watamu Marine National Park so the water is protected. Photo taken by me in February.",
+      "hashtags": ["#watamubeach", "#marinepark"]
+    },
+    {
+      "file": "gede-ruins.jpg",
+      "category": "the area around Watamu",
+      "notes": "The Gede Ruins, a 12th century Swahili town swallowed by forest, 15 minutes drive inland from the house. Huge baobab and tamarind trees grow through the coral-stone walls. There are monkeys everywhere. Good half-day trip.",
+      "hashtags": ["#gederuins", "#swahilihistory"]
+    }
+  ]
+}
