@@ -297,6 +297,15 @@ def write_caption(filename, api_key):
     return subject, clean_caption(caption)
 
 
+def add_call_to_action(caption, subject, config):
+    """Append one of YOUR booking lines. Never written by the AI."""
+    cta = config.get("call_to_action", {})
+    options = list(cta.get(subject, [])) + list(cta.get("any", []))
+    if not options:
+        return caption
+    return f"{caption}\n\n{random.choice(options)}"
+
+
 def add_hashtags(caption, subject, config):
     tags = list(config.get("always_hashtags", []))
     tags += config.get("subject_hashtags", {}).get(subject, [])
@@ -375,6 +384,7 @@ def main():
     api_key = env(key_name, required=not DRY_RUN)
 
     subject, caption = write_caption(filename, api_key)
+    caption = add_call_to_action(caption, subject, config)
     full_caption = add_hashtags(caption, subject, config)
 
     print("\n" + "=" * 60)
