@@ -1,6 +1,5 @@
 {
-  "_readme": "You do not describe your photos - the AI looks at them. It also decides whether each photo is villa / beach / nature / culture, and takes its hashtags from the matching list below. 'always_hashtags' go on every post.",
-
+  "_readme": "You do not describe your photos - the AI looks at them. It sorts each into villa / beach / nature / culture and takes hashtags from the matching list. EDIT 'call_to_action' - those are your booking lines and the AI never writes them. One is picked at random each post. Instagram captions cannot contain clickable links, so they must point at the link in your bio.",
   "always_hashtags": [
     "#watamu",
     "#watamukenya",
@@ -8,7 +7,6 @@
     "#magicalkenya",
     "#kenyatravel"
   ],
-
   "subject_hashtags": {
     "villa": [
       "#villarental",
@@ -38,6 +36,37 @@
       "#eastafrica",
       "#kenyaculture",
       "#localtravel"
+    ]
+  },
+  "call_to_action": {
+    "villa": [
+      "Furaha House, Watamu. Dates and details via the link in bio.",
+      "The house is open for bookings - link in bio.",
+      "Come and stay. Everything you need to know is in the bio.",
+      "Enquiries welcome, drop us a message or see the link in bio.",
+      "This is the house. Link in bio if you'd like to stay in it."
+    ],
+    "beach": [
+      "Furaha House is a short walk from here. Link in bio.",
+      "Stay just up the road from this. Details in bio.",
+      "This is the beach you'd wake up to. Link in bio to book.",
+      "Come and see it yourself - booking details in the bio."
+    ],
+    "nature": [
+      "One of the places we send our guests. Stay with us - link in bio.",
+      "Watamu has more of this than you'd expect. Furaha House, link in bio.",
+      "We'll tell you how to get here when you stay. Details in bio.",
+      "Base yourself at Furaha House and explore. Link in bio."
+    ],
+    "culture": [
+      "There is a lot to see around Watamu. Stay with us - link in bio.",
+      "One of our favourite days out. Furaha House, link in bio.",
+      "We point every guest here. Booking details in the bio.",
+      "Come for the house, stay for all of this. Link in bio."
+    ],
+    "any": [
+      "Furaha House, Watamu - link in bio.",
+      "Booking and details via the link in bio."
     ]
   }
 }
