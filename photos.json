@@ -1,21 +1,43 @@
 {
-  "_readme": "You do NOT need to describe your photos any more - the AI looks at them. This file only holds hashtags. Just upload JPEGs to the photos/ folder and they get used automatically.",
+  "_readme": "You do not describe your photos - the AI looks at them. It also decides whether each photo is villa / beach / nature / culture, and takes its hashtags from the matching list below. 'always_hashtags' go on every post.",
 
-  "hashtags": [
+  "always_hashtags": [
     "#watamu",
     "#watamukenya",
     "#kenyacoast",
-    "#villarental",
-    "#holidayvilla",
-    "#indianocean",
-    "#malindi",
-    "#kenyatravel",
     "#magicalkenya",
-    "#beachhouse"
+    "#kenyatravel"
   ],
 
-  "extra_hashtags": {
-    "watamu-beach.jpg": ["#watamubeach"],
-    "gede-ruins.jpg": ["#gederuins"]
+  "subject_hashtags": {
+    "villa": [
+      "#villarental",
+      "#holidayvilla",
+      "#beachhouse",
+      "#privatevilla",
+      "#watamuaccommodation",
+      "#indianocean"
+    ],
+    "beach": [
+      "#watamubeach",
+      "#indianocean",
+      "#beachlife",
+      "#watamumarinepark",
+      "#kenyabeaches"
+    ],
+    "nature": [
+      "#kenyanature",
+      "#wildkenya",
+      "#eastafrica",
+      "#naturephotography",
+      "#kenyalandscape"
+    ],
+    "culture": [
+      "#swahiliculture",
+      "#swahilicoast",
+      "#eastafrica",
+      "#kenyaculture",
+      "#localtravel"
+    ]
   }
 }
