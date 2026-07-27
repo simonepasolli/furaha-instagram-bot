@@ -123,7 +123,17 @@ Style:
 - No citation markers, reference numbers, source links, or square brackets.
 - Write in English.
 
-Output the caption text only. No preamble, no quotation marks, no explanation."""
+First decide what this photograph mainly shows. Choose exactly one label:
+  villa    - the house, its rooms, terrace, garden, pool, interiors, details
+  beach    - sand, sea, coastline, boats, the ocean
+  nature   - inland landscape, forest, rock, river, wildlife, birds
+  culture  - ruins, markets, towns, buildings, craft, food, people at work
+
+Then write the caption.
+
+Reply in exactly this format and nothing else:
+SUBJECT: <one label>
+CAPTION: <your caption>"""
 
 USER_MESSAGE = ("Here is the photograph. Write the caption, following your rules "
                 "exactly. Describe only what you can actually see.")
@@ -150,6 +160,23 @@ def prepare_image(filename):
 
     print(f"  sending {len(raw) // 1024} KB to the caption model")
     return base64.standard_b64encode(raw).decode("utf-8"), "image/jpeg"
+
+
+def split_reply(text):
+    """Pull the subject label and caption out of the model's reply."""
+    subject, caption = "villa", text
+
+    match = re.search(r"SUBJECT:\s*(\w+)", text, re.IGNORECASE)
+    if match:
+        found = match.group(1).lower()
+        if found in ("villa", "beach", "nature", "culture"):
+            subject = found
+
+    match = re.search(r"CAPTION:\s*(.+)", text, re.IGNORECASE | re.DOTALL)
+    if match:
+        caption = match.group(1)
+
+    return subject, caption
 
 
 def clean_caption(text):
@@ -253,7 +280,7 @@ def call_perplexity(image_b64, media_type, api_key):
 
 def write_caption(filename, api_key):
     if DRY_RUN and not api_key:
-        return "[dry run - no API key set, caption not generated]"
+        return "villa", "[dry run - no API key set, caption not generated]"
 
     image_b64, media_type = prepare_image(filename)
 
@@ -265,12 +292,14 @@ def write_caption(filename, api_key):
         sys.exit(f"ERROR: CAPTION_PROVIDER is '{CAPTION_PROVIDER}'. "
                  "It must be 'perplexity' or 'anthropic'.")
 
-    return clean_caption(raw)
+    subject, caption = split_reply(raw)
+    print(f"  subject detected: {subject}")
+    return subject, clean_caption(caption)
 
 
-def add_hashtags(caption, filename, config):
-    tags = list(config.get("hashtags", []))
-    tags += config.get("extra_hashtags", {}).get(filename, [])
+def add_hashtags(caption, subject, config):
+    tags = list(config.get("always_hashtags", []))
+    tags += config.get("subject_hashtags", {}).get(subject, [])
 
     seen, unique = set(), []
     for tag in tags:
@@ -345,8 +374,8 @@ def main():
     key_name = "PERPLEXITY_API_KEY" if CAPTION_PROVIDER == "perplexity" else "ANTHROPIC_API_KEY"
     api_key = env(key_name, required=not DRY_RUN)
 
-    caption = write_caption(filename, api_key)
-    full_caption = add_hashtags(caption, filename, config)
+    subject, caption = write_caption(filename, api_key)
+    full_caption = add_hashtags(caption, subject, config)
 
     print("\n" + "=" * 60)
     print(full_caption)
